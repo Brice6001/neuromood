@@ -1,66 +1,148 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
+
+interface MoodEntry {
+  id: string;
+  mood: string;
+  emoji: string;
+  intensity: number;
+  note: string;
+  created_at: string;
+}
 
 const Dashboard: React.FC = () => {
+  const { user } = useAuth();
+  const [profileName, setProfileName] = useState('');
+  const [latestEntry, setLatestEntry] = useState<MoodEntry | null>(null);
+  const [recentEntries, setRecentEntries] = useState<MoodEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const loadDashboardData = async () => {
+      setLoading(true);
+      try {
+        // 1. Fetch user's profile full_name
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .single();
+
+        if (profileData?.full_name) {
+          setProfileName(profileData.full_name);
+        } else {
+          // Default to email local part
+          setProfileName(user.email ? user.email.split('@')[0] : 'User');
+        }
+
+        // 2. Fetch latest mood entries (up to 3 for recent history)
+        const { data: moodLogs, error: moodError } = await supabase
+          .from('mood_entries')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(3);
+
+        if (!moodError && moodLogs) {
+          setRecentEntries(moodLogs);
+          if (moodLogs.length > 0) {
+            setLatestEntry(moodLogs[0]);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading dashboard data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDashboardData();
+  }, [user]);
+
+  // Format date helper
+  const formatTimeAgo = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.round(diffMs / 60000);
+    const diffHours = Math.round(diffMs / 3600000);
+
+    if (diffMins < 60) {
+      return `${diffMins}m ago`;
+    } else if (diffHours < 24) {
+      return `${diffHours}h ago`;
+    } else {
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+  };
+
   return (
     <main className="pt-20 md:pt-8 pb-28 md:pb-8 px-container-padding-mobile md:px-container-padding-desktop md:ml-64 max-w-[1600px] mx-auto">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between mb-stack-md gap-4">
         <div>
-          <h2 className="font-headline-lg-mobile md:font-headline-lg text-text-primary">Good morning, Alex</h2>
+          <h2 className="font-headline-lg-mobile md:font-headline-lg text-text-primary capitalize">
+            Good day, {profileName}
+          </h2>
           <p className="text-text-secondary mt-1">Here is your wellness overview for today.</p>
         </div>
         <div className="hidden md:flex items-center gap-3">
           <button className="p-3 rounded-full bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high transition-colors">
             <span className="material-symbols-outlined">notifications</span>
           </button>
-          <img
-            alt="User Profile"
-            className="w-12 h-12 rounded-full object-cover border border-border-subtle"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCGOGIaDS9pb-X7cJyFFiZ05WgmvV1Z8Y99VRjC8aWJcNttL7nNFslfJulQkoCHB3LWDzBDhKuphiOMsQo_7Na7X3z2-q9E1T-MjeS-kqylREAX1imqnUWOcwHhW7GmNRBdxfpm0m6J0gNUrvWDxWS22IUbMcyzN5xw9phOWPJFz4D4NbFD9CJ-xXvX0x-v0HPp27Vktw2LIAGU7PhzqxJg1a7lSDkL3nlw0dGDPoVZ-8qQzSgx9IjCJIh_UJ_UYsSKEEdcSGDVDVM"
-          />
+          <div className="w-12 h-12 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-bold text-lg shadow-sm border border-border-subtle">
+            {profileName.slice(0, 2).toUpperCase()}
+          </div>
         </div>
       </div>
 
       {/* Bento Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-stack-md">
         
-        {/* Hero Metric Card */}
+        {/* Current Mood Status Card */}
         <div className="bg-surface rounded-DEFAULT shadow-[0_4px_6px_rgba(39,33,60,0.1)] p-6 flex flex-col justify-between">
           <div className="flex justify-between items-start mb-4">
-            <h3 className="font-headline-md text-headline-md text-text-primary">Current Balance</h3>
+            <h3 className="font-headline-md text-headline-md text-text-primary">Current Mood</h3>
             <span className="px-3 py-1 bg-surface-container-low text-primary rounded-full font-label-sm text-label-sm font-medium">
-              Updated 2h ago
+              {latestEntry ? `Updated ${formatTimeAgo(latestEntry.created_at)}` : 'No logs yet'}
             </span>
           </div>
           <div className="flex items-center gap-6 mt-4">
-            <div className="w-20 h-20 bg-secondary-fixed rounded-full flex items-center justify-center">
-              <span className="text-4xl">😌</span>
+            <div className="w-20 h-20 bg-secondary-fixed rounded-full flex items-center justify-center text-4xl shadow-inner">
+              {latestEntry ? latestEntry.emoji : '😌'}
             </div>
             <div>
-              <p className="font-headline-lg text-headline-lg text-text-primary">Calm &amp; Focused</p>
+              <p className="font-headline-lg text-headline-lg text-text-primary">
+                {latestEntry ? latestEntry.mood : 'Calm & Focused'}
+              </p>
               <p className="text-success-growth font-medium flex items-center gap-1 mt-1">
                 <span className="material-symbols-outlined text-[18px]">trending_up</span>
-                Steady over 3 days
+                {latestEntry ? `Intensity ${latestEntry.intensity}/10` : 'Ready to start logging'}
               </p>
             </div>
           </div>
         </div>
 
-        {/* AI Wellness Card */}
+        {/* AI Wellness Insight Card */}
         <div className="bg-secondary-fixed rounded-DEFAULT p-6 flex flex-col relative overflow-hidden xl:col-span-1">
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <span className="material-symbols-outlined text-[80px]">auto_awesome</span>
           </div>
           <div className="flex items-center gap-2 mb-4 text-secondary relative z-10">
             <span className="material-symbols-outlined">psychology</span>
-            <h3 className="font-headline-md text-headline-md font-medium">AI Insight</h3>
+            <h3 className="font-headline-md text-headline-md font-semibold">AI Insight</h3>
           </div>
-          <p className="text-on-secondary-fixed-variant relative z-10 text-[18px] leading-relaxed mb-6">
-            We noticed your energy levels dip around 3 PM consistently. Consider scheduling a brief 10-minute mindful walk before your afternoon meetings.
+          <p className="text-on-secondary-fixed-variant relative z-10 text-[17px] leading-relaxed mb-6">
+            {latestEntry?.note 
+              ? `Based on your recent note "${latestEntry.note.substring(0, 50)}...", consider scheduling a brief 10-minute walk or journaling session to balance your energy.`
+              : "Welcome to NeuroMood! Once you log your emotional state and write down your notes in the Mood Logger, Gemini AI will analyze your journals to provide personalized recommendations here."}
           </p>
-          <button className="mt-auto self-start px-6 py-2 bg-surface text-primary rounded-full font-medium shadow-sm hover:shadow-md transition-shadow relative z-10">
+          <Link to="/insights" className="mt-auto self-start px-6 py-2 bg-surface text-primary rounded-full font-medium shadow-sm hover:shadow-md transition-shadow relative z-10">
             View Details
-          </button>
+          </Link>
         </div>
 
         {/* Mood Trend Line Chart */}
@@ -97,51 +179,41 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* History List */}
+        {/* Recent History List */}
         <div className="bg-surface rounded-DEFAULT shadow-[0_4px_6px_rgba(39,33,60,0.1)] p-6 md:col-span-2 xl:col-span-1">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-headline-md text-headline-md text-text-primary">Recent History</h3>
-            <button className="text-primary font-medium text-sm hover:underline">See All</button>
+            <Link to="/history" className="text-primary font-medium text-sm hover:underline">See All</Link>
           </div>
           <div className="flex flex-col">
-            <div className="py-4 border-b border-border-subtle flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-surface-container-low rounded-full flex items-center justify-center text-xl">
-                  🌟
+            {recentEntries.length > 0 ? (
+              recentEntries.map((row) => (
+                <div key={row.id} className="py-4 border-b last:border-b-0 border-border-subtle flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-surface-container-low rounded-full flex items-center justify-center text-xl shadow-inner">
+                      {row.emoji}
+                    </div>
+                    <div>
+                      <p className="font-medium text-text-primary">{row.mood}</p>
+                      <p className="text-xs text-text-secondary">
+                        {new Date(row.created_at).toLocaleDateString()} at {new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="px-3 py-1 bg-surface-container-low text-primary-container rounded-full text-xs font-semibold border border-primary-fixed/20">
+                    Intensity: {row.intensity}
+                  </div>
                 </div>
-                <div>
-                  <p className="font-medium text-text-primary">Motivated</p>
-                  <p className="text-sm text-text-secondary">Today, 9:00 AM</p>
-                </div>
+              ))
+            ) : (
+              <div className="py-12 text-center text-text-muted text-sm">
+                <span className="material-symbols-outlined text-4xl mb-2 block">history</span>
+                No entries logged yet.
+                <Link to="/log" className="text-primary-container block font-medium mt-2 hover:underline">
+                  Log your first mood
+                </Link>
               </div>
-              <div className="px-3 py-1 bg-surface-container-low text-primary-container rounded-full text-sm font-medium">Intensity: 8</div>
-            </div>
-
-            <div className="py-4 border-b border-border-subtle flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-surface-container-low rounded-full flex items-center justify-center text-xl">
-                  😌
-                </div>
-                <div>
-                  <p className="font-medium text-text-primary">Relaxed</p>
-                  <p className="text-sm text-text-secondary">Yesterday, 8:30 PM</p>
-                </div>
-              </div>
-              <div className="px-3 py-1 bg-surface-container-low text-success-growth rounded-full text-sm font-medium">Intensity: 5</div>
-            </div>
-
-            <div className="py-4 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-surface-container-low rounded-full flex items-center justify-center text-xl">
-                  😮‍💨
-                </div>
-                <div>
-                  <p className="font-medium text-text-primary">Overwhelmed</p>
-                  <p className="text-sm text-text-secondary">Yesterday, 2:15 PM</p>
-                </div>
-              </div>
-              <div className="px-3 py-1 bg-surface-container-low text-primary rounded-full text-sm font-medium">Intensity: 7</div>
-            </div>
+            )}
           </div>
         </div>
 
